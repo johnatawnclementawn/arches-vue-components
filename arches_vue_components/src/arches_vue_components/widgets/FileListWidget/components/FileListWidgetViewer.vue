@@ -4,6 +4,9 @@ import { computed, onMounted } from "vue";
 import arches from "arches";
 import { Image, Galleria } from "primevue";
 
+import { useLanguageStore } from "@/arches_vue_components/stores/useLanguageStore.ts";
+import { getFileAltText } from "@/arches_vue_components/datatypes/file-list/utils.ts";
+
 import type {
     FileListAliasedNodeData,
     FileReference,
@@ -17,8 +20,11 @@ const emit = defineEmits<{
     initialized: [updatedValue: FileListAliasedNodeData];
 }>();
 
-onMounted(() => {
+const languageStore = useLanguageStore();
+
+onMounted(async () => {
     emit("initialized", aliasedNodeData);
+    await languageStore.fetchAllLanguages();
 });
 
 const imageData = computed(() => {
@@ -26,8 +32,10 @@ const imageData = computed(() => {
         return {
             thumbnailImageSrc: getFileUrl(fileReference.url),
             itemImageSrc: getFileUrl(fileReference.url),
-            alt: fileReference.altText,
-            title: fileReference.title,
+            alt: getFileAltText(
+                fileReference,
+                languageStore.requestLanguageCode,
+            ),
         };
     });
 });

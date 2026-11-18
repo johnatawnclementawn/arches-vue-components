@@ -6,11 +6,19 @@ import FileUpload from "primevue/fileupload";
 import FileList from "@/arches_vue_components/widgets/FileListWidget/components/FileListWidgetEditor/components/FileList.vue";
 import FileDropZone from "@/arches_vue_components/widgets/FileListWidget/components/FileListWidgetEditor/components/FileDropZone.vue";
 
-import { buildFileListAliasedNodeData } from "@/arches_vue_components/datatypes/file-list/utils.ts";
+import { useLanguageStore } from "@/arches_vue_components/stores/useLanguageStore.ts";
+import {
+    buildEmptyFileMetadata,
+    buildFileListAliasedNodeData,
+    getVisibleMetadataFields,
+    shouldShowMetadataLanguageSelect,
+} from "@/arches_vue_components/datatypes/file-list/utils.ts";
 
+import type { LanguageValue } from "@/arches_vue_components/datatypes/string/types.ts";
 import type {
     FileListAliasedNodeData,
     FileListCardXNodeXWidgetData,
+    FileMetadataField,
     FileReference,
 } from "@/arches_vue_components/datatypes/file-list/types.ts";
 import type {
@@ -18,9 +26,14 @@ import type {
     PrimeVueFile,
 } from "@/arches_vue_components/widgets/FileListWidget/types.ts";
 
-const { aliasedNodeData, cardXNodeXWidgetData = undefined } = defineProps<{
+const {
+    aliasedNodeData,
+    cardXNodeXWidgetData = undefined,
+    metadataLanguageCode = undefined,
+} = defineProps<{
     aliasedNodeData: FileListAliasedNodeData | null;
     cardXNodeXWidgetData?: FileListCardXNodeXWidgetData;
+    metadataLanguageCode?: string;
 }>();
 
 const emit = defineEmits<{
@@ -28,10 +41,47 @@ const emit = defineEmits<{
         event: "update:aliasedNodeData",
         updatedValue: FileListAliasedNodeData,
     ): void;
+    (
+        event: "update:metadataLanguageCode",
+        languageCode: string,
+        fileIndex: number,
+    ): void;
     (event: "initialized", updatedValue: FileListAliasedNodeData): void;
 }>();
 
 const fileUploadRef = ref<InstanceType<typeof FileUpload> | null>(null);
+
+const languageStore = useLanguageStore();
+
+onMounted(async () => {
+    emit("initialized", aliasedNodeData ?? buildFileListAliasedNodeData(null));
+    await languageStore.fetchAllLanguages();
+});
+
+const requestLanguage = computed(() =>
+    languageStore.languages.find(
+        (language) => language.code === languageStore.requestLanguageCode,
+    ),
+);
+
+const defaultMetadataLanguage = computed(
+    () =>
+        languageStore.languages.find(
+            (language) => language.code === metadataLanguageCode,
+        ) ?? requestLanguage.value,
+);
+
+const isMetadataLanguageSelectShown = computed(() =>
+    shouldShowMetadataLanguageSelect(cardXNodeXWidgetData),
+);
+
+const isAltTextRequired = computed(() =>
+    Boolean(cardXNodeXWidgetData?.node.config?.imagesOnly),
+);
+
+const visibleMetadataFields = computed(() =>
+    getVisibleMetadataFields(cardXNodeXWidgetData),
+);
 
 const savedFiles = ref<FileReference[]>([]);
 const pendingFiles = ref<FileData[]>([]);
@@ -88,10 +138,6 @@ watchEffect(() => {
     pendingFiles.value = nextPendingFiles;
 });
 
-onMounted(() => {
-    emit("initialized", aliasedNodeData ?? buildFileListAliasedNodeData(null));
-});
-
 function emitUpdatedValue() {
     const allFiles = [
         ...savedFiles.value,
@@ -101,16 +147,58 @@ function emitUpdatedValue() {
 }
 
 function onSelect(event: { files: PrimeVueFile[] }): void {
-    pendingFiles.value = event.files.map((file) => ({
-        name: file.name,
-        size: file.size,
-        type: file.type,
-        url: file.objectURL,
-        file: file,
-        node_id: cardXNodeXWidgetData?.node.nodeid ?? "",
-    }));
+    // event.files holds every pending file, not just the new ones, so keep
+    // the metadata already entered for files that were selected earlier.
+    pendingFiles.value = event.files.map((file) => {
+        const existingPendingFile = pendingFiles.value.find(
+            (pendingFile) => pendingFile.file === file,
+        );
+        return {
+            ...buildEmptyFileMetadata(languageStore.languages),
+            ...existingPendingFile,
+            name: file.name,
+            size: file.size,
+            type: file.type,
+            url: file.objectURL,
+            file: file,
+            node_id: cardXNodeXWidgetData?.node.nodeid ?? "",
+        };
+    });
 
     emitUpdatedValue();
+}
+
+function onUpdatePendingFileMetadata(
+    fileIndex: number,
+    field: FileMetadataField,
+    localizedValue: Record<string, LanguageValue>,
+): void {
+    pendingFiles.value[fileIndex] = {
+        ...pendingFiles.value[fileIndex],
+        [field]: localizedValue,
+    };
+    emitUpdatedValue();
+}
+
+function onUpdateSavedFileMetadata(
+    fileIndex: number,
+    field: FileMetadataField,
+    localizedValue: Record<string, LanguageValue>,
+): void {
+    savedFiles.value[fileIndex] = {
+        ...savedFiles.value[fileIndex],
+        [field]: localizedValue,
+    };
+    emitUpdatedValue();
+}
+
+// Saved files come first in the emitted value (see emitUpdatedValue), so a
+// pending file's index is offset by the number of saved files.
+function onSelectMetadataLanguage(
+    languageCode: string,
+    fileIndexInValue: number,
+): void {
+    emit("update:metadataLanguageCode", languageCode, fileIndexInValue);
 }
 
 function onRemovePendingFile(
@@ -159,16 +247,39 @@ function openFileChooser(): void {
 
             <FileList
                 :files="pendingFiles as unknown as FileReference[]"
+                :languages="languageStore.languages"
+                :default-metadata-language="defaultMetadataLanguage"
+                :should-show-language-select="isMetadataLanguageSelectShown"
+                :visible-metadata-fields="visibleMetadataFields"
+                :is-alt-text-required="isAltTextRequired"
                 @remove="
                     (_fileReference, fileIndex) =>
                         onRemovePendingFile(fileIndex, removeFileCallback)
+                "
+                @update:metadata="onUpdatePendingFileMetadata"
+                @update:metadata-language="
+                    (fileIndex, languageCode) =>
+                        onSelectMetadataLanguage(
+                            languageCode,
+                            savedFiles.length + fileIndex,
+                        )
                 "
             />
 
             <FileList
                 :files="savedFiles"
+                :languages="languageStore.languages"
+                :default-metadata-language="defaultMetadataLanguage"
+                :should-show-language-select="isMetadataLanguageSelectShown"
+                :visible-metadata-fields="visibleMetadataFields"
+                :is-alt-text-required="isAltTextRequired"
                 @remove="
                     (_fileReference, fileIndex) => onRemoveSavedFile(fileIndex)
+                "
+                @update:metadata="onUpdateSavedFileMetadata"
+                @update:metadata-language="
+                    (fileIndex, languageCode) =>
+                        onSelectMetadataLanguage(languageCode, fileIndex)
                 "
             />
         </template>
@@ -176,6 +287,10 @@ function openFileChooser(): void {
 </template>
 
 <style scoped>
+:deep(.p-fileupload) {
+    color: inherit;
+    background: transparent;
+}
 :deep(.p-fileupload-header) {
     display: none;
 }

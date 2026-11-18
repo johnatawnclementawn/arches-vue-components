@@ -2,6 +2,14 @@ import type {
     AliasedNodeData,
     CardXNodeXWidgetData,
 } from "@/arches_vue_components/types.ts";
+import type { LanguageValue } from "@/arches_vue_components/datatypes/string/types.ts";
+import type { FILE_METADATA_FIELDS } from "@/arches_vue_components/datatypes/file-list/constants.ts";
+
+export type FileMetadataField = (typeof FILE_METADATA_FIELDS)[number];
+export type FileMetadata = Record<
+    FileMetadataField,
+    Record<string, LanguageValue>
+>;
 
 export interface FileReference {
     url: string;
@@ -17,11 +25,15 @@ export interface FileReference {
     file_id: string;
     accepted: boolean;
     lastModified: number;
-    altText: string;
-    attribution: string;
-    description: string;
-    title: string;
+    altText?: Record<string, LanguageValue>;
+    attribution?: Record<string, LanguageValue>;
+    description?: Record<string, LanguageValue>;
+    title?: Record<string, LanguageValue>;
 }
+export interface FileMetadataVisibilityConfig {
+    visible: boolean;
+}
+
 export interface FileListCardXNodeXWidgetData extends CardXNodeXWidgetData {
     config: CardXNodeXWidgetData["config"] & {
         acceptedFiles: string;
@@ -29,6 +41,10 @@ export interface FileListCardXNodeXWidgetData extends CardXNodeXWidgetData {
         maxFilesize: number;
         rerender: boolean;
         label: string;
+        metadataFields?: Partial<
+            Record<FileMetadataField, FileMetadataVisibilityConfig>
+        >;
+        metadataLanguageSelect?: FileMetadataVisibilityConfig;
     };
 }
 
